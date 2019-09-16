@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"mapreduce"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // The mapping function is called once for each piece of the input.
@@ -15,14 +15,11 @@ import (
 // key/value pairs, each represented by a mapreduce.KeyValue.
 func mapF(document string, value string) (res []mapreduce.KeyValue) {
 	// TODO: you have to write this function
-	reg, _ := regexp.Compile("[^0-9a-zA-Z]+")
-	words := strings.Fields(value)
-	for _, word := range words{
-		validWord := reg.ReplaceAllString(word, "")
-		if len(validWord) >= 1 {
-			// res = append(res, mapreduce.KeyValue{strings.ToLower(validWord), "1"})
-			res = append(res, mapreduce.KeyValue{validWord, "1"})
-		}
+	words := strings.FieldsFunc(value, func(c rune) bool {
+		return !unicode.IsLetter(c)
+	})
+	for _, word := range words {
+		res = append(res, mapreduce.KeyValue{word, "1"})
 	}
 	return res
 }
