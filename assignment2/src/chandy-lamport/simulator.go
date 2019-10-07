@@ -1,6 +1,7 @@
 package chandy_lamport
 
 import (
+	//	"fmt"
 	"log"
 	"math/rand"
 )
@@ -24,6 +25,9 @@ type Simulator struct {
 	servers        map[string]*Server // key = server ID
 	logger         *Logger
 	// TODO: ADD MORE FIELDS HERE
+	snapshots          map[int]*SnapshotState
+	SnapshotComplete   *SyncMap
+	isSnapshotComplete *SyncMap
 }
 
 func NewSimulator() *Simulator {
@@ -32,6 +36,9 @@ func NewSimulator() *Simulator {
 		0,
 		make(map[string]*Server),
 		NewLogger(),
+		make(map[int]*SnapshotState),
+		NewSyncMap(),
+		NewSyncMap(),
 	}
 }
 
@@ -90,6 +97,8 @@ func (sim *Simulator) Tick() {
 			if !link.events.Empty() {
 				e := link.events.Peek().(SendMessageEvent)
 				if e.receiveTime <= sim.time {
+					// fmt.Println("DEBUG - message", e.message)
+					// fmt.Println("DEBUG - time", e.receiveTime)
 					link.events.Pop()
 					sim.logger.RecordEvent(
 						sim.servers[e.dest],
@@ -108,6 +117,7 @@ func (sim *Simulator) StartSnapshot(serverId string) {
 	sim.nextSnapshotId++
 	sim.logger.RecordEvent(sim.servers[serverId], StartSnapshot{serverId, snapshotId})
 	// TODO: IMPLEMENT ME
+	sim.servers[serverId].StartSnapshot(snapshotId)
 }
 
 // Callback for servers to notify the simulator that the snapshot process has
@@ -115,6 +125,27 @@ func (sim *Simulator) StartSnapshot(serverId string) {
 func (sim *Simulator) NotifySnapshotComplete(serverId string, snapshotId int) {
 	sim.logger.RecordEvent(sim.servers[serverId], EndSnapshot{serverId, snapshotId})
 	// TODO: IMPLEMENT ME
+	// We call the snapshotComplete method and store its value and status
+	val, ok := sim.SnapshotComplete.Load(snapshotId)
+	// fmt.Println("DEBUG - val: ", val)
+	// If it is ok, we increment c and store de snapshot
+	if ok {
+		c := val.(int)
+		c++
+		sim.SnapshotComplete.Store(snapshotId, c)
+	} else {
+		sim.SnapshotComplete.Store(snapshotId, 1)
+	}
+	val2, ok2 := sim.SnapshotComplete.Load(snapshotId)
+	if ok2 {
+		tot := val2.(int)
+		//fmt.Println("DEBUG - tot: ", tot)
+		//fmt.Println("DEBUG - len(sim.servers): ", len(sim.servers))
+		if tot == len(sim.servers) {
+			// Once we reach the number of servers we notify
+			sim.isSnapshotComplete.Store(snapshotId, true)
+		}
+	}
 }
 
 // Collect and merge snapshot state from all the servers.
@@ -122,5 +153,17 @@ func (sim *Simulator) NotifySnapshotComplete(serverId string, snapshotId int) {
 func (sim *Simulator) CollectSnapshot(snapshotId int) *SnapshotState {
 	// TODO: IMPLEMENT ME
 	snap := SnapshotState{snapshotId, make(map[string]int), make([]*SnapshotMessage, 0)}
+	for {
+		val, ok := sim.isSnapshotComplete.Load(snapshotId)
+		if ok {
+			newVal := val.(bool)
+			if newVal {
+				snap = *sim.snapshots[snapshotId]
+				break
+			}
+		}
+	}
+	// fmt.Println("DEBUG - time: ", sim.time)
+	// fmt.Println(&snap)
 	return &snap
 }
