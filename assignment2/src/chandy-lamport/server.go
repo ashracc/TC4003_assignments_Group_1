@@ -2,6 +2,7 @@ package chandy_lamport
 
 import (
 	//	"fmt"
+	"fmt"
 	"log"
 )
 
@@ -18,7 +19,6 @@ type Server struct {
 	inboundLinks  map[string]*Link // key = link.src
 	// TODO: ADD MORE FIELDS HERE
 	//isSnapServer int
-
 	//markers map[int][]*Link
 	markers *SyncMap
 }
@@ -98,9 +98,9 @@ func (server *Server) HandlePacket(src string, message interface{}) {
 	case TokenMessage:
 		// add the tokens
 		server.Tokens += message.numTokens
-		// fmt.Println("DEBUG - inside token from", src)
-		// fmt.Println("DEBUG - server.Id: ", server.Id)
+		fmt.Println("DEBUG - SRV > HandlePacket > TokenMessage > from", src)
 		// check if the server has received any marker message from the src server
+		fmt.Println("DEBUG - SRV > HandlePacket > TokenMessage > server has markers from", src, "?")
 		size := 0
 		server.markers.Range(func(k interface{}, v interface{}) bool {
 			size++
@@ -118,13 +118,15 @@ func (server *Server) HandlePacket(src string, message interface{}) {
 						// if snapshotted then don't record on this channel
 						if m.src == src {
 							check = false
+							fmt.Println("DEBUG - SRV > HandlePacket > TokenMessage > it is snapshotted")
 						}
 					}
 					if check {
 						// save the tokens on this channel for the snapshot
 						tokenMessage := SnapshotMessage{src, server.Id, message}
-						// fmt.Println("DEBUG - tokens,", tokenMessage)
-						// fmt.Println("DEBUG - id:", id)
+						fmt.Println("DEBUG - SRV > HandlePacket > TokenMessage > save tokens for snapshot")
+						fmt.Println("DEBUG - SRV > HandlePacket > TokenMessage > tokens,", tokenMessage)
+						fmt.Println("DEBUG - SRV > HandlePacket > TokenMessage > id:", id)
 						server.sim.snapshots[id].messages = append(server.sim.snapshots[id].messages, &tokenMessage)
 					}
 				}
@@ -136,18 +138,18 @@ func (server *Server) HandlePacket(src string, message interface{}) {
 		// add marker snapshot ID to the map as the key
 		// append the link information to the snapshot ID
 		l := Link{src, server.Id, NewQueue()}
-		// fmt.Println("DEBUG - inside marker from", src)
+		fmt.Println("DEBUG - SRV > HandlePacket > MarkerMessage > from", src, "to", server.Id)
 		// fmt.Println("DEBUG - ", server.Id)
 		val, ok := server.markers.Load(message.snapshotId)
 		if ok == false {
-			// fmt.Println("inside marker if")
+			fmt.Println("DEBUG - SRV > HandlePacket > MarkerMessage > SendToNeighbors IS required")
 			var newVal []*Link
 			newVal = append(newVal, &l)
 			server.markers.Store(message.snapshotId, newVal)
 			server.SendToNeighbors(MarkerMessage{message.snapshotId})
 			server.sim.snapshots[message.snapshotId].tokens[server.Id] = server.Tokens
 		} else {
-			// fmt.Println("inside marker else")
+			fmt.Println("DEBUG - SRV > HandlePacket > MarkerMessage > SendToNeighbors NOT required")
 			// var newVal []*Link
 			newVal := val.([]*Link)
 			newVal = append(newVal, &l)
@@ -157,12 +159,12 @@ func (server *Server) HandlePacket(src string, message interface{}) {
 		// send it to the neighbors
 		// check if all the inbound links have received this snapshotID
 		vals, ok := server.markers.Load(message.snapshotId)
-		// fmt.Println("DEBGU - inside marker before notify", vals)
+		//fmt.Println("DEBUG - inside marker before notify", vals)
 		size := vals.([]*Link)
-		// fmt.Println("DEBUG - inside marker before notify")
+		//fmt.Println("DEBUG - inside marker before notify")
 		if len(size) >= len(server.inboundLinks) {
 			// notify simulator
-			// fmt.Println("DEBUG - notify")
+			fmt.Println("DEBUG - SRV > HandlePacket > before NotifySnapshotComplete")
 			server.sim.NotifySnapshotComplete(server.Id, message.snapshotId)
 		}
 	default:
@@ -177,6 +179,7 @@ func (server *Server) StartSnapshot(snapshotId int) {
 	// Record its local state
 	//server.isSnapServer = 1
 	//SnapshotState{snapshotId, t, nil}
+	fmt.Println("DEBUG - SRV > StartSnapshot > Recording local state, id:", snapshotId)
 	tokens := make(map[string]int)
 	tokens[server.Id] = server.Tokens
 	l := Link{server.Id, server.Id, NewQueue()}
@@ -188,4 +191,5 @@ func (server *Server) StartSnapshot(snapshotId int) {
 	server.sim.snapshots[snapshotId] = &snap
 	// Send marker message to the neighbors
 	server.SendToNeighbors(MarkerMessage{snapshotId})
+	fmt.Println("DEBUG - SRV > StartSnapshot > marker message sent to the neighbors, snapshotId:", snapshotId)
 }

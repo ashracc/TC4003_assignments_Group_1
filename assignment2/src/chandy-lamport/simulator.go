@@ -1,6 +1,7 @@
 package chandy_lamport
 
 import (
+	"fmt"
 	//	"fmt"
 	"log"
 	"math/rand"
@@ -97,8 +98,8 @@ func (sim *Simulator) Tick() {
 			if !link.events.Empty() {
 				e := link.events.Peek().(SendMessageEvent)
 				if e.receiveTime <= sim.time {
-					// fmt.Println("DEBUG - message", e.message)
-					// fmt.Println("DEBUG - time", e.receiveTime)
+					fmt.Println("DEBUG - SIM > Tick > the message is a:", e.message)
+					//fmt.Println("DEBUG - time", e.receiveTime)
 					link.events.Pop()
 					sim.logger.RecordEvent(
 						sim.servers[e.dest],
@@ -118,6 +119,7 @@ func (sim *Simulator) StartSnapshot(serverId string) {
 	sim.logger.RecordEvent(sim.servers[serverId], StartSnapshot{serverId, snapshotId})
 	// TODO: IMPLEMENT ME
 	sim.servers[serverId].StartSnapshot(snapshotId)
+	fmt.Println("DEBUG - SIM > StartSnapshot > Snapshot", snapshotId, "for", serverId, "started")
 }
 
 // Callback for servers to notify the simulator that the snapshot process has
@@ -127,7 +129,7 @@ func (sim *Simulator) NotifySnapshotComplete(serverId string, snapshotId int) {
 	// TODO: IMPLEMENT ME
 	// We call the snapshotComplete method and store its value and status
 	val, ok := sim.SnapshotComplete.Load(snapshotId)
-	// fmt.Println("DEBUG - val: ", val)
+	fmt.Println("DEBUG - SIM > NotifySnapshotComplete > val:", val)
 	// If it is ok, we increment c and store de snapshot
 	if ok {
 		c := val.(int)
@@ -139,8 +141,8 @@ func (sim *Simulator) NotifySnapshotComplete(serverId string, snapshotId int) {
 	val2, ok2 := sim.SnapshotComplete.Load(snapshotId)
 	if ok2 {
 		tot := val2.(int)
-		//fmt.Println("DEBUG - tot: ", tot)
-		//fmt.Println("DEBUG - len(sim.servers): ", len(sim.servers))
+		fmt.Println("DEBUG - SIM > NotifySnapshotComplete > tot of snapshots: ", tot)
+		fmt.Println("DEBUG - SIM > NotifySnapshotComplete > len(sim.servers): ", len(sim.servers))
 		if tot == len(sim.servers) {
 			// Once we reach the number of servers we notify
 			sim.isSnapshotComplete.Store(snapshotId, true)
@@ -154,16 +156,17 @@ func (sim *Simulator) CollectSnapshot(snapshotId int) *SnapshotState {
 	// TODO: IMPLEMENT ME
 	snap := SnapshotState{snapshotId, make(map[string]int), make([]*SnapshotMessage, 0)}
 	for {
+		// fmt.Println("DEBUG - CollectSnapshot > while...")
 		val, ok := sim.isSnapshotComplete.Load(snapshotId)
 		if ok {
+			fmt.Println("DEBUG - SIM > CollectSnapshot > while > if SnapshotComplete")
 			newVal := val.(bool)
 			if newVal {
 				snap = *sim.snapshots[snapshotId]
+				fmt.Println("DEBUG - SIM > CollectSnapshot > while > if snapshotComplete > if newVal > snap:", &snap)
 				break
 			}
 		}
 	}
-	// fmt.Println("DEBUG - time: ", sim.time)
-	// fmt.Println(&snap)
 	return &snap
 }

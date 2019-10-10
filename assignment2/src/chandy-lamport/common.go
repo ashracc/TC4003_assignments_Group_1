@@ -7,7 +7,7 @@ import (
 	"sort"
 )
 
-const debug = true
+const debug = false
 
 // ====================================
 //  Messages exchanged between servers
