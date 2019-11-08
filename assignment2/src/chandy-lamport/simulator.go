@@ -1,8 +1,6 @@
 package chandy_lamport
 
 import (
-	"fmt"
-	//	"fmt"
 	"log"
 	"math/rand"
 )
@@ -25,10 +23,16 @@ type Simulator struct {
 	nextSnapshotId int
 	servers        map[string]*Server // key = server ID
 	logger         *Logger
-	// TODO: ADD MORE FIELDS HERE
-	snapshots          map[int]*SnapshotState
-	SnapshotComplete   *SyncMap
-	isSnapshotComplete *SyncMap
+
+	// Map of snapshots
+	// This SyncMap internally is a map[int]*SnapshotState
+	snapshots *SyncMap
+
+	// Snapshot blocking variable until completition
+	snapshotWait map[int](chan bool)
+
+	// Snapshot count of finished servers
+	snapshotCompleted map[int]int
 }
 
 func NewSimulator() *Simulator {
@@ -37,9 +41,9 @@ func NewSimulator() *Simulator {
 		0,
 		make(map[string]*Server),
 		NewLogger(),
-		make(map[int]*SnapshotState),
 		NewSyncMap(),
-		NewSyncMap(),
+		make(map[int](chan bool)),
+		make(map[int]int),
 	}
 }
 
@@ -98,8 +102,6 @@ func (sim *Simulator) Tick() {
 			if !link.events.Empty() {
 				e := link.events.Peek().(SendMessageEvent)
 				if e.receiveTime <= sim.time {
-					fmt.Println("DEBUG - SIM > Tick > the message is a:", e.message)
-					//fmt.Println("DEBUG - time", e.receiveTime)
 					link.events.Pop()
 					sim.logger.RecordEvent(
 						sim.servers[e.dest],
@@ -117,56 +119,49 @@ func (sim *Simulator) StartSnapshot(serverId string) {
 	snapshotId := sim.nextSnapshotId
 	sim.nextSnapshotId++
 	sim.logger.RecordEvent(sim.servers[serverId], StartSnapshot{serverId, snapshotId})
-	// TODO: IMPLEMENT ME
+
+	// Create an new instance of a global snapshot with `snapshotId`
+	sim.snapshots.Store(snapshotId, SnapshotState{
+		snapshotId,
+		make(map[string]int),
+		make([]*SnapshotMessage, 0),
+	})
+
+	// Initialize wait channel for the snapshot
+	sim.snapshotWait[snapshotId] = make(chan bool, 1)
+
+	// Initialize number of completed servers
+	sim.snapshotCompleted[snapshotId] = 0
+
+	// Start first local snapshot in a server with `serverId`
 	sim.servers[serverId].StartSnapshot(snapshotId)
-	fmt.Println("DEBUG - SIM > StartSnapshot > Snapshot", snapshotId, "for", serverId, "started")
 }
 
 // Callback for servers to notify the simulator that the snapshot process has
 // completed on a particular server
 func (sim *Simulator) NotifySnapshotComplete(serverId string, snapshotId int) {
 	sim.logger.RecordEvent(sim.servers[serverId], EndSnapshot{serverId, snapshotId})
-	// TODO: IMPLEMENT ME
-	// We call the snapshotComplete method and store its value and status
-	val, ok := sim.SnapshotComplete.Load(snapshotId)
-	fmt.Println("DEBUG - SIM > NotifySnapshotComplete > val:", val)
-	// If it is ok, we increment c and store de snapshot
-	if ok {
-		c := val.(int)
-		c++
-		sim.SnapshotComplete.Store(snapshotId, c)
-	} else {
-		sim.SnapshotComplete.Store(snapshotId, 1)
-	}
-	val2, ok2 := sim.SnapshotComplete.Load(snapshotId)
-	if ok2 {
-		tot := val2.(int)
-		fmt.Println("DEBUG - SIM > NotifySnapshotComplete > tot of snapshots: ", tot)
-		fmt.Println("DEBUG - SIM > NotifySnapshotComplete > len(sim.servers): ", len(sim.servers))
-		if tot == len(sim.servers) {
-			// Once we reach the number of servers we notify
-			sim.isSnapshotComplete.Store(snapshotId, true)
-		}
+
+	// Increase number of completed servers
+	sim.snapshotCompleted[snapshotId]++
+
+	// If all servers have completed, then unlock snapshot wait channel
+	if sim.snapshotCompleted[snapshotId] == len(sim.servers) {
+		sim.snapshotWait[snapshotId] <- true
 	}
 }
 
 // Collect and merge snapshot state from all the servers.
 // This function blocks until the snapshot process has completed on all servers.
 func (sim *Simulator) CollectSnapshot(snapshotId int) *SnapshotState {
-	// TODO: IMPLEMENT ME
-	snap := SnapshotState{snapshotId, make(map[string]int), make([]*SnapshotMessage, 0)}
-	for {
-		// fmt.Println("DEBUG - CollectSnapshot > while...")
-		val, ok := sim.isSnapshotComplete.Load(snapshotId)
-		if ok {
-			fmt.Println("DEBUG - SIM > CollectSnapshot > while > if SnapshotComplete")
-			newVal := val.(bool)
-			if newVal {
-				snap = *sim.snapshots[snapshotId]
-				fmt.Println("DEBUG - SIM > CollectSnapshot > while > if snapshotComplete > if newVal > snap:", &snap)
-				break
-			}
-		}
-	}
+	// Wait for snapshot to complete
+	<-sim.snapshotWait[snapshotId]
+
+	// Close channel
+	close(sim.snapshotWait[snapshotId])
+
+	// Get snapshot
+	value, _ := sim.snapshots.Load(snapshotId)
+	snap := value.(SnapshotState)
 	return &snap
 }

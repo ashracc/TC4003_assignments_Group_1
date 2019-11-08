@@ -1,10 +1,6 @@
 package chandy_lamport
 
-import (
-	//	"fmt"
-	"fmt"
-	"log"
-)
+import "log"
 
 // The main participant of the distributed snapshot protocol.
 // Servers exchange token messages and marker messages among each other.
@@ -17,10 +13,11 @@ type Server struct {
 	sim           *Simulator
 	outboundLinks map[string]*Link // key = link.dest
 	inboundLinks  map[string]*Link // key = link.src
-	// TODO: ADD MORE FIELDS HERE
-	//isSnapServer int
-	//markers map[int][]*Link
-	markers *SyncMap
+
+	// Map to keep track of channel recording state
+	// True means recording, false means recording has stopped
+	// Description is: map[snapshotId]map[src]recording_enabled
+	chanRecordState map[int]map[string]bool
 }
 
 // A unidirectional communication channel between two servers
@@ -38,8 +35,7 @@ func NewServer(id string, tokens int, sim *Simulator) *Server {
 		sim,
 		make(map[string]*Link),
 		make(map[string]*Link),
-		//make(map[int][]*Link),
-		NewSyncMap(),
+		make(map[int]map[string]bool),
 	}
 }
 
@@ -93,103 +89,72 @@ func (server *Server) SendTokens(numTokens int, dest string) {
 // When the snapshot algorithm completes on this server, this function
 // should notify the simulator by calling `sim.NotifySnapshotComplete`.
 func (server *Server) HandlePacket(src string, message interface{}) {
-	// TODO: IMPLEMENT ME
 	switch message := message.(type) {
-	case TokenMessage:
-		// add the tokens
-		server.Tokens += message.numTokens
-		fmt.Println("DEBUG - SRV > HandlePacket > TokenMessage > from", src)
-		// check if the server has received any marker message from the src server
-		fmt.Println("DEBUG - SRV > HandlePacket > TokenMessage > server has markers from", src, "?")
-		size := 0
-		server.markers.Range(func(k interface{}, v interface{}) bool {
-			size++
-			return true
-		})
-
-		if size > 0 {
-			server.markers.Range(func(k interface{}, v interface{}) bool {
-				val, ok := server.markers.Load(k)
-				markerMessages := val.([]*Link)
-				id := k.(int)
-				if ok {
-					check := true
-					for _, m := range markerMessages {
-						// if snapshotted then don't record on this channel
-						if m.src == src {
-							check = false
-							fmt.Println("DEBUG - SRV > HandlePacket > TokenMessage > it is snapshotted")
-						}
-					}
-					if check {
-						// save the tokens on this channel for the snapshot
-						tokenMessage := SnapshotMessage{src, server.Id, message}
-						fmt.Println("DEBUG - SRV > HandlePacket > TokenMessage > save tokens for snapshot")
-						fmt.Println("DEBUG - SRV > HandlePacket > TokenMessage > tokens,", tokenMessage)
-						fmt.Println("DEBUG - SRV > HandlePacket > TokenMessage > id:", id)
-						server.sim.snapshots[id].messages = append(server.sim.snapshots[id].messages, &tokenMessage)
-					}
-				}
-				return true
-			})
-		}
-
 	case MarkerMessage:
-		// add marker snapshot ID to the map as the key
-		// append the link information to the snapshot ID
-		l := Link{src, server.Id, NewQueue()}
-		fmt.Println("DEBUG - SRV > HandlePacket > MarkerMessage > from", src, "to", server.Id)
-		// fmt.Println("DEBUG - ", server.Id)
-		val, ok := server.markers.Load(message.snapshotId)
-		if ok == false {
-			fmt.Println("DEBUG - SRV > HandlePacket > MarkerMessage > SendToNeighbors IS required")
-			var newVal []*Link
-			newVal = append(newVal, &l)
-			server.markers.Store(message.snapshotId, newVal)
-			server.SendToNeighbors(MarkerMessage{message.snapshotId})
-			server.sim.snapshots[message.snapshotId].tokens[server.Id] = server.Tokens
-		} else {
-			fmt.Println("DEBUG - SRV > HandlePacket > MarkerMessage > SendToNeighbors NOT required")
-			// var newVal []*Link
-			newVal := val.([]*Link)
-			newVal = append(newVal, &l)
-			server.markers.Store(message.snapshotId, newVal)
+		// If first time received marker, then start snapshot
+		if server.chanRecordState[message.snapshotId] == nil {
+			server.StartSnapshot(message.snapshotId)
 		}
-		// server.markers[message.snapshotId] = append(server.markers[message.snapshotId], &l)
-		// send it to the neighbors
-		// check if all the inbound links have received this snapshotID
-		vals, ok := server.markers.Load(message.snapshotId)
-		//fmt.Println("DEBUG - inside marker before notify", vals)
-		size := vals.([]*Link)
-		//fmt.Println("DEBUG - inside marker before notify")
-		if len(size) >= len(server.inboundLinks) {
-			// notify simulator
-			fmt.Println("DEBUG - SRV > HandlePacket > before NotifySnapshotComplete")
+
+		// Stop recording messages from `src`
+		server.chanRecordState[message.snapshotId][src] = false
+
+		// Evaluate if all recording messages have stopped
+		completed := true
+		for _, state := range server.chanRecordState[message.snapshotId] {
+			if state {
+				completed = false
+				break
+			}
+		}
+
+		// If no more recordings, then server has finished snapshot
+		if completed {
 			server.sim.NotifySnapshotComplete(server.Id, message.snapshotId)
 		}
+
+	case TokenMessage:
+		// If there is a recording enabled for this `src`,
+		// then save message in snapshot
+		for snapshotId, states := range server.chanRecordState {
+			if states[src] {
+				value, _ := server.sim.snapshots.Load(snapshotId)
+				snap := value.(SnapshotState)
+				snap.messages = append(snap.messages, &SnapshotMessage{
+					src,
+					server.Id,
+					message,
+				})
+				server.sim.snapshots.Store(snapshotId, snap)
+			}
+		}
+
+		// Receive tokens
+		server.Tokens += message.numTokens
 	default:
-		log.Fatal("Unknown event command: ")
+		log.Fatal("Error unknown message: ", message)
 	}
 }
 
 // Start the chandy-lamport snapshot algorithm on this server.
 // This should be called only once per server.
 func (server *Server) StartSnapshot(snapshotId int) {
-	// TODO: IMPLEMENT ME
-	// Record its local state
-	//server.isSnapServer = 1
-	//SnapshotState{snapshotId, t, nil}
-	fmt.Println("DEBUG - SRV > StartSnapshot > Recording local state, id:", snapshotId)
-	tokens := make(map[string]int)
-	tokens[server.Id] = server.Tokens
-	l := Link{server.Id, server.Id, NewQueue()}
-	var newVal []*Link
-	newVal = append(newVal, &l)
-	server.markers.Store(snapshotId, newVal)
-	//server.markers[snapshotId] = append(server.markers[snapshotId], &l)
-	snap := SnapshotState{snapshotId, tokens, nil}
-	server.sim.snapshots[snapshotId] = &snap
-	// Send marker message to the neighbors
+	// Initialize record tracking for this snapshot
+	server.chanRecordState[snapshotId] = make(map[string]bool)
+
+	// Enable recordings from each incoming channels
+	for link := range server.inboundLinks {
+		from := server.inboundLinks[link].src
+		server.chanRecordState[snapshotId][from] = true
+	}
+
+	// Get the glogal snapshot
+	value, _ := server.sim.snapshots.Load(snapshotId)
+	snap := value.(SnapshotState)
+
+	// Snapshot server tokens
+	snap.tokens[server.Id] = server.Tokens
+
+	// Send marker to all neighbors
 	server.SendToNeighbors(MarkerMessage{snapshotId})
-	fmt.Println("DEBUG - SRV > StartSnapshot > marker message sent to the neighbors, snapshotId:", snapshotId)
 }
