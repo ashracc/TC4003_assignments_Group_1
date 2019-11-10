@@ -50,6 +50,19 @@ type Raft struct {
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
+	//persistent state on all server
+	currentTerm   int
+	votedFor      int
+	log           []LogEntry
+
+	//volatile state on all servers
+	commitIndex   int
+	lastApplied   int
+
+	//volatile state on leader
+	nextIndex     []int
+	matchIndex    []int
+
 }
 
 // return currentTerm and whether this server
